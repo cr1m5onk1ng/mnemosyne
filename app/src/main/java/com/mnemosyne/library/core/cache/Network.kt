@@ -3,9 +3,13 @@ package com.mnemosyne.library.core.cache
 import com.mnemosyne.library.core.domain.Resource
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.channels.consumeEach
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.job
@@ -27,9 +31,18 @@ open class NetworkCacheAgent<T> private constructor(
 
     private var commandsChannel: Channel<CacheCommand> = Channel(capacity = Channel.BUFFERED)
 
+    private var processJob: Job? = null
+        set(value) {
+            if(field != value && value == null) {
+                cancel()
+            }
+            field = value
+        }
+
     init {
         scope.coroutineContext.job.invokeOnCompletion {
             commandsChannel.close()
+            processJob = null
         }
 
         launch {
@@ -44,7 +57,7 @@ open class NetworkCacheAgent<T> private constructor(
     }
 
     open fun process(command: CacheCommand) {
-        when(command) {
+        processJob = when(command) {
             Get -> {
                 launch {
                     resource.emit(Resource.Loading(null))
@@ -66,6 +79,27 @@ open class NetworkCacheAgent<T> private constructor(
                         } catch (t: Throwable) {
                             if(t is CancellationException) throw t
                             resource.update { Resource.Error(cached, t) }
+                        }
+                    }
+                }
+            }
+            is FetchPeriodically -> {
+                launch {
+                    coroutineScope {
+                        while (true) {
+                            ensureActive()
+                            val cached = policy.get()
+                            try {
+                                val net = policy.fetch()
+                                launch(Dispatchers.IO) {
+                                    policy.cache(net)
+                                }
+                                resource.emit(Resource.Success(net))
+                                delay(command.milliseconds)
+                            } catch (t: Throwable) {
+                                if(t is CancellationException) throw t
+                                resource.emit(Resource.Error(cached, t))
+                            }
                         }
                     }
                 }
@@ -97,6 +131,7 @@ open class NetworkCacheAgent<T> private constructor(
                     resource.emit(Resource.Success(policy.get()))
                 }
             }
+            StopProcessing -> null
         }
     }
 }

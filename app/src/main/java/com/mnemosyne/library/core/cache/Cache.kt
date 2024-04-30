@@ -8,11 +8,13 @@ object Get: CacheCommand
 
 object Fetch: CacheCommand
 
+data class FetchPeriodically(val milliseconds: Long): CacheCommand
+
 object Refresh: CacheCommand
 
 data class Remove<T>(val key: T): CacheCommand
 
-
+object StopProcessing: CacheCommand
 
 interface CacheAgent : CoroutineScope {
     fun ask(command: CacheCommand)
