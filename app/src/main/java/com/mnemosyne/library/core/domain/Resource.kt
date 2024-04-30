@@ -30,6 +30,10 @@ inline fun <T, R> Resource<T?>.map(block: (T?) -> R): Resource<R> {
     }
 }
 
+inline fun <T, E: Throwable> Resource.Error<T>.mapError(transform: (Throwable) -> E): Resource.Error<T> {
+    return Resource.Error(this.cached, transform(this.error))
+}
+
 inline fun <T, D, R> Resource<T?>.or(
     other: Resource<D?>,
     combiner: (T?, D?) -> R
